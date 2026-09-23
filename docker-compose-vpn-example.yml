@@ -1,0 +1,139 @@
+services:
+  vpn:
+    #image: wolasss/l2tp-ipsec-vpn-client
+    #image: ubergarm/l2tp-ipsec-vpn-client
+    image: l2tp-ipsec-vpn-custom:latest
+    container_name: vpn-l2tp
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/ppp:/dev/ppp
+    volumes:
+      - /lib/modules:/lib/modules:ro
+    environment:
+      VPN_SERVER_IPV4: "12.12.12.12"
+      VPN_PSK: "ipsecsecretvalue"
+      VPN_USERNAME: "user"
+      VPN_PASSWORD: "password"
+      # Route otomatis setelah L2TP berhasil connect
+      #VPN_CMD_ON_CONNECTED: "ip route replace 10.88.0.0/24 dev ppp0"
+      #VPN_LOCAL_GATEWAY: "10.88.0.1"
+    ports:
+      # mikhmon
+      - "6060:80"
+      - "18061:6061"
+      
+      # GOST Winbox forwarding
+      - "18291:18291"
+      - "18292:18292"
+      - "18293:18293"
+
+      # GOST API
+      - "18080:18080"
+
+      # GOST Web UI
+      - "6061:8081"
+    restart: unless-stopped
+
+  route:
+    image: alpine:latest
+    container_name: vpn-route
+    network_mode: "service:vpn"
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - vpn
+    command: >
+      sh -c '
+      apk add --no-cache iproute2 &&
+      while true; do
+        if ip link show ppp0 >/dev/null 2>&1; then
+          ip route replace 10.88.0.0/24 dev ppp0;
+        fi;
+        sleep 3;
+      done'
+    restart: unless-stopped
+
+  mikhmon1:
+    image: animegasan/mikhmon:v3-latest
+    container_name: mikhmon1
+    network_mode: "service:vpn"
+    volumes:
+     - mikhmon_data:/var/www/html
+    depends_on:
+      - vpn
+    healthcheck:
+      test: ["CMD", "nc", "-z", "-w", "3", "127.0.0.1", "80"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    labels:
+      autoheal: "true"
+
+  mikhmon2:
+    image: aisatriani/mikhmon:ros6
+    container_name: mikhmon2
+    network_mode: "service:vpn"
+    environment:
+      HTTP_PORT: 6061   
+    volumes:
+      - mikhmon_data_example:/app
+    depends_on:
+      - vpn
+    healthcheck:
+      # port pengecekan harus sama dengan port yang di expose di environment HTTP_PORT
+      test: ["CMD", "nc", "-z", "-w", "3", "127.0.0.1", "6061"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    labels:
+      autoheal: "true"
+
+
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: autoheal
+    restart: unless-stopped
+
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 10
+      AUTOHEAL_START_PERIOD: 30
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: 10
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  gost:
+    image: gogost/gost:3.2.6
+    container_name: gost
+    network_mode: "service:vpn"
+    depends_on:
+      - vpn
+      - route
+    volumes:
+      - ./gost/gost.json:/bin/gost.json
+    command:
+      - "-C"
+      - "/bin/gost.json"
+    restart: unless-stopped
+
+
+  gost-ui:
+    #image: gogost/gost-ui:latest
+    image: gost-ui:8081
+    container_name: gost-ui
+    network_mode: "service:vpn"
+    depends_on:
+      - vpn
+      - gost
+    restart: unless-stopped
+
+volumes:
+  mikhmon_data:
+  mikhmon_data_example:

@@ -1,0 +1,21 @@
+services:
+
+  mikhmon:
+    image: aisatriani/mikhmon:ros6 # atau ros7, sesuaikan dengan versi mikrotik yang digunakan
+    container_name: mikhmon
+    environment:
+      HTTP_PORT: 8080 # default port mikhmon 80, bisa diubah sesuai kebutuhan
+    ports:
+      - "8081:8080"   
+    volumes:
+      - mikhmon_data:/app
+    depends_on:
+      - vpn
+    healthcheck:
+      # port pengecekan harus sama dengan port yang di expose di environment HTTP_PORT
+      test: ["CMD", "nc", "-z", "-w", "3", "127.0.0.1", "8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
